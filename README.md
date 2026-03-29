@@ -87,6 +87,10 @@ Add security exception for `https://127.0.0.1:38383`:
 DRAFT — needs testing with live e-services.prb.bg session.
 PKCS#11 ↔ signxml integration may need adjustments.
 
+## SECURITY AUDIT
+
+**See [AUDIT.md](AUDIT.md) for full security analysis.**
+
 ## Original Java applet analysis
 
 See `SIRMA_PROTOCOL.md` for full protocol details including

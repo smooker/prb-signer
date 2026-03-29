@@ -91,3 +91,9 @@ PKCS#11 ↔ signxml integration may need adjustments.
 
 See `SIRMA_PROTOCOL.md` for full protocol details including
 the legendary PIGN/POGN messages (not PING/PONG).
+
+---
+
+# NO MORE PIGN/POGN. 😄
+
+*SCteam, 2026-03-29*

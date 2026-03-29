@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<jnlp spec="1.0+" codebase="https://e-services.prb.bg/epob-ui/" href="DigitalSignLocal.jnlp">
+    <information>
+        <title>Digital Sign Server</title>
+        <vendor>Sirma</vendor>
+        <homepage href="https://e-services.prb.bg/epob-ui/" />
+        <description>Application for digital signing of documents</description>
+    </information>
+    <security>
+        <all-permissions/>
+    </security>
+    <update check="always" policy="always"/>
+    <resources>
+        <j2se version="1.7+" initial-heap-size="128m" max-heap-size="1024m"/>
+        <jar href="digital-sign-server-1.0-SNAPSHOT.jar" />
+        <jar href="dependency/commons-codec-1.9.jar" />
+        <jar href="dependency/commons-lang-2.2.jar" />
+        <jar href="dependency/iaikPkcs11Wrapper.jar" />
+        <jar href="dependency/javax.servlet-api-3.1.0.jar" />
+        <jar href="dependency/jetty-http-9.2.7.v20150116.jar" />
+        <jar href="dependency/jetty-io-9.2.7.v20150116.jar" />
+        <jar href="dependency/jetty-security-9.2.7.v20150116.jar" />
+        <jar href="dependency/jetty-server-9.2.7.v20150116.jar" />
+        <jar href="dependency/jetty-servlet-9.2.7.v20150116.jar" />
+        <jar href="dependency/jetty-util-9.2.7.v20150116.jar" />
+        <jar href="dependency/slf4j-api-1.7.7.jar" />
+        <jar href="dependency/stax2-api-3.1.4.jar" />
+        <jar href="dependency/stax-api-1.0-2.jar" />
+        <jar href="dependency/websocket-api-9.2.7.v20150116.jar" />
+        <jar href="dependency/websocket-client-9.2.7.v20150116.jar" />
+        <jar href="dependency/websocket-common-9.2.7.v20150116.jar" />
+        <jar href="dependency/websocket-server-9.2.7.v20150116.jar" />
+        <jar href="dependency/websocket-servlet-9.2.7.v20150116.jar" />
+        <jar href="dependency/woodstox-core-asl-4.4.1.jar" />
+        <jar href="dependency/xmlsec-2.0.2.jar" />
+    </resources>
+    <application-desc main-class="com.sirma.digitalsign.DigitalSignServer" />
+</jnlp>

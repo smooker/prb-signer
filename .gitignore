@@ -1,0 +1,11 @@
+*.pcapng
+*.jks
+*.cer
+*.jar
+*.class
+certs/
+__pycache__/
+*.pyc
+decompiled/
+*.tar.gz
+run.txt

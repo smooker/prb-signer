@@ -312,15 +312,35 @@ class PRBSignerServer:
 
         try:
             async for message in websocket:
-                log.info("Received: %.80s...", message)
+                log.info("Received [%d bytes]: %r", len(message), message[:200])
 
-                # Control messages
+                # Control messages (SIRMA protocol)
                 if message in ("STOP", "stop"):
                     log.info("Stop requested")
                     await websocket.close()
                     return
 
+                # PIGN/POGN — keep-alive (yes, PIGN not PING)
+                if message == "PIGN":
+                    await websocket.send("POGN")
+                    continue
+
+                if message == "POGN":
+                    continue
+
+                if message == "SHOW_UP":
+                    log.info("SHOW_UP received")
+                    continue
+
+                # Browser asks "who are you?" to check if server is alive
+                # Browser ping: "who are you?" → must respond "DigitalSignWebSocket"
+                if "who are you" in message.lower():
+                    log.info("Responding: DigitalSignWebSocket")
+                    await websocket.send("DigitalSignWebSocket")
+                    continue
+
                 if not message.startswith('{"type"'):
+                    log.info("Unknown message: %.40s", message)
                     await websocket.send("who are you?")
                     continue
 
@@ -344,6 +364,12 @@ class PRBSignerServer:
                 log.info("Signing [%.60s...] with stampToken [%s]", xml_str, stamp_token)
 
                 try:
+                    # Skip empty XML (browser probe)
+                    if not xml_str.strip():
+                        log.info("Empty XML — browser probe, skipping")
+                        await websocket.send("ERROR: empty XML")
+                        continue
+
                     # Initialize signer on first sign request
                     if not self.signer:
                         pin = self.pin
@@ -359,9 +385,8 @@ class PRBSignerServer:
                     await websocket.send(signed_xml)
 
                 except Exception as e:
-                    error_msg = f"ERROR: {e}"
-                    log.error(error_msg)
-                    await websocket.send(error_msg)
+                    log.error("Sign error: %s", e, exc_info=True)
+                    await websocket.send("ERROR: signing failed")
 
         except websockets.exceptions.ConnectionClosed as e:
             log.info("Socket Closed: [%s] %s", e.code, e.reason)
@@ -375,12 +400,24 @@ class PRBSignerServer:
         log.info("Starting PRB Signer on wss://%s:%d/sign/", self.host, self.port)
         log.info("PKCS#11 lib: %s", PKCS11_LIB)
 
+        async def process_request(connection, request):
+            """Handle plain HTTP requests (for cert accept in browser)."""
+            if request.headers.get("Upgrade", "").lower() != "websocket":
+                from websockets.http11 import Response
+                return Response(200, "OK",
+                    websockets.datastructures.Headers({"Content-Type": "text/html"}),
+                    b"<html><body><h1>PRB Signer OK</h1>"
+                    b"<p>Certificate accepted. You can close this tab.</p>"
+                    b"<p>Go to <a href='https://e-services.prb.bg'>e-services.prb.bg</a> to sign.</p>"
+                    b"</body></html>")
+
         async with websockets.serve(
             self.handle_websocket,
             self.host,
             self.port,
             ssl=ssl_ctx,
             subprotocols=None,
+            process_request=process_request,
         ):
             log.info("Server ready. Listening for browser requests...")
             print()

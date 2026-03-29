@@ -80,3 +80,18 @@ Line 269: `ipaddress.IPv4Address` — модулът се import-ва на line 
 
 **Localhost only. No outbound connections. PIN never logged or sent over network.**
 **Smart card private key never leaves the card (PKCS#11).**
+
+## Fix log: PIN at startup (FIXED)
+
+Original code asked for PIN at server startup — before any browser request.
+This is wrong: PIN should only be requested at the moment of signing.
+PIN in memory for longer than needed = unnecessary exposure.
+
+**Fixed**: PIN prompt moved to first sign request handler.
+**Lesson**: Always audit WHEN credentials are acquired, not just WHERE they go.
+
+## Design principle: PIN timing
+
+PIN MUST be requested only at the moment of signing, never at startup.
+The server starts and listens without PIN. On first sign request from browser,
+user is prompted interactively. This minimizes PIN exposure time in memory.

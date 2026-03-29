@@ -71,7 +71,7 @@ class SmartCardSigner:
         if self.pin:
             self.session.login(self.pin)
 
-        # Find certificate
+        # Find all certificates
         certs = self.session.findObjects([
             (PyKCS11.CKA_CLASS, PyKCS11.CKO_CERTIFICATE),
             (PyKCS11.CKA_CERTIFICATE_TYPE, PyKCS11.CKC_X_509),
@@ -80,7 +80,8 @@ class SmartCardSigner:
         if not certs:
             raise RuntimeError("No certificate found on smart card")
 
-        # Get first non-CA certificate (signing cert)
+        # Collect non-CA certificates with matching private keys
+        candidates = []
         for cert_obj in certs:
             attrs = self.session.getAttributeValue(cert_obj, [
                 PyKCS11.CKA_VALUE, PyKCS11.CKA_LABEL, PyKCS11.CKA_ID
@@ -91,8 +92,7 @@ class SmartCardSigner:
 
             x509 = load_der_x509_certificate(cert_der)
 
-            # Skip CA certs — look for end-entity
-            basic = None
+            # Skip CA certs
             try:
                 from cryptography.x509 import ExtensionOID
                 basic = x509.extensions.get_extension_for_oid(ExtensionOID.BASIC_CONSTRAINTS)
@@ -101,21 +101,39 @@ class SmartCardSigner:
             except Exception:
                 pass
 
-            self.cert = x509
-            self.cert_der = cert_der
-            log.info("Certificate: %s (SN: %s)", cert_label, x509.serial_number)
-
-            # Find matching private key by CKA_ID
+            # Check for matching private key
             privkeys = self.session.findObjects([
                 (PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),
                 (PyKCS11.CKA_ID, cert_id),
             ])
             if privkeys:
-                self.privkey_handle = privkeys[0]
-                log.info("Private key found (ID match)")
-                return
+                candidates.append((cert_label, cert_id, cert_der, x509, privkeys[0]))
 
-        raise RuntimeError("No suitable signing certificate found")
+        if not candidates:
+            raise RuntimeError("No suitable signing certificate found")
+
+        # If multiple — let user choose
+        if len(candidates) == 1:
+            choice = 0
+        else:
+            print("\nAvailable signing certificates:")
+            for i, (label, _, _, x509, _) in enumerate(candidates):
+                subj = x509.subject.rfc4514_string()
+                sn = x509.serial_number
+                valid = x509.not_valid_after_utc.strftime("%Y-%m-%d")
+                print(f"  [{i+1}] {subj}")
+                print(f"       Label: {label}  SN: {sn:X}  Valid until: {valid}")
+            while True:
+                try:
+                    choice = int(input(f"\nSelect certificate [1-{len(candidates)}]: ")) - 1
+                    if 0 <= choice < len(candidates):
+                        break
+                except (ValueError, EOFError):
+                    pass
+                print("Invalid choice.")
+
+        cert_label, cert_id, self.cert_der, self.cert, self.privkey_handle = candidates[choice]
+        log.info("Using certificate: %s (SN: %s)", cert_label, self.cert.serial_number)
 
     def sign_xml(self, xml_str, stamp_token=None):
         """Sign XML document using smart card.
@@ -251,11 +269,13 @@ class PRBSignerServer:
             return
 
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        today = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
         name = x509.Name([
             x509.NameAttribute(NameOID.COUNTRY_NAME, "BG"),
             x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Sofia"),
             x509.NameAttribute(NameOID.LOCALITY_NAME, "Sofia"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "PRB Signer"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "SCteam"),
+            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "IT@SCteam"),
             x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1"),
         ])
         cert = (x509.CertificateBuilder()
@@ -263,10 +283,18 @@ class PRBSignerServer:
                 .issuer_name(name)
                 .public_key(key.public_key())
                 .serial_number(x509.random_serial_number())
-                .not_valid_before(datetime.datetime.utcnow())
-                .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))
+                .not_valid_before(datetime.datetime.now(datetime.UTC))
+                .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3650))
                 .add_extension(
-                    x509.SubjectAlternativeName([x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))]),
+                    x509.SubjectAlternativeName([
+                        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                        x509.DNSName("localhost"),
+                        x509.DNSName("127.0.0.1"),
+                        x509.RFC822Name("sc@smooker.org"),
+                        x509.DirectoryName(x509.Name([
+                            x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1"),
+                        ])),
+                    ]),
                     critical=False,
                 )
                 .sign(key, hashes.SHA256()))
@@ -316,9 +344,14 @@ class PRBSignerServer:
                 log.info("Signing [%.60s...] with stampToken [%s]", xml_str, stamp_token)
 
                 try:
-                    # Initialize signer on first use
+                    # Initialize signer on first sign request
                     if not self.signer:
-                        self.signer = SmartCardSigner(pin=self.pin)
+                        pin = self.pin
+                        if not pin:
+                            import getpass
+                            print()  # newline after log output
+                            pin = getpass.getpass("Smart card PIN (first sign request): ")
+                        self.signer = SmartCardSigner(pin=pin)
                         self.signer.open()
 
                     signed_xml = self.signer.sign_xml(xml_str, stamp_token)
@@ -349,7 +382,14 @@ class PRBSignerServer:
             ssl=ssl_ctx,
             subprotocols=None,
         ):
-            log.info("Server ready. Waiting for connections...")
+            log.info("Server ready. Listening for browser requests...")
+            print()
+            print("FIRST TIME?")
+            print("  1. Open https://127.0.0.1:38383 in Firefox")
+            print("  2. Accept the self-signed certificate warning")
+            print("  3. Go to https://e-services.prb.bg")
+            print("  4. Sign your document — PIN will be asked here")
+            print()
             await asyncio.Future()  # run forever
 
 
@@ -367,17 +407,12 @@ def main():
         global PKCS11_LIB
         PKCS11_LIB = args.pkcs11_lib
 
-    pin = args.pin
-    if not pin:
-        import getpass
-        pin = getpass.getpass("Smart card PIN: ")
-
     server = PRBSignerServer(
         host=args.host,
         port=args.port,
         certfile=args.cert,
         keyfile=args.key,
-        pin=pin,
+        pin=args.pin,  # None = will prompt on first sign request
     )
 
     try:

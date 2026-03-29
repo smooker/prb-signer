@@ -86,9 +86,10 @@ class SmartCardSigner:
             attrs = self.session.getAttributeValue(cert_obj, [
                 PyKCS11.CKA_VALUE, PyKCS11.CKA_LABEL, PyKCS11.CKA_ID
             ])
-            cert_der = bytes(attrs[0])
-            cert_label = bytes(attrs[1]).decode('utf-8', errors='replace').strip()
-            cert_id = bytes(attrs[2])
+            cert_der = bytes(attrs[0]) if not isinstance(attrs[0], bytes) else attrs[0]
+            cert_label = attrs[1] if isinstance(attrs[1], str) else bytes(attrs[1]).decode('utf-8', errors='replace')
+            cert_label = cert_label.strip().rstrip('\x00')
+            cert_id = bytes(attrs[2]) if not isinstance(attrs[2], bytes) else attrs[2]
 
             x509 = load_der_x509_certificate(cert_der)
 
@@ -156,17 +157,6 @@ class SmartCardSigner:
 
         # Sign using signxml with PKCS#11
         # signxml needs a key — we'll use the PKCS#11 session for raw signing
-        signer = XMLSigner(
-            method=methods.enveloped,
-            digest_algorithm="sha1",       # Match SIRMA (SHA-1, unfortunately)
-            signature_algorithm="rsa-sha1", # Match SIRMA
-            c14n_algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments",
-        )
-
-        # We need to provide the private key for signing
-        # signxml can use a PKCS#11 callback or we sign with PyKCS11 directly
-        # For now, use the PyKCS11 raw sign approach
-
         signed_root = self._sign_with_pkcs11(root)
 
         # Serialize
@@ -190,14 +180,14 @@ class SmartCardSigner:
                 self.key_handle = key_handle
                 self.algorithm = algorithm
 
-            def sign(self, data, padding_obj, hash_algo):
+            def sign(self, data, padding=None, algorithm=None):
                 """Sign data using PKCS#11."""
-                if isinstance(hash_algo, hashes.SHA1):
+                if isinstance(algorithm, hashes.SHA1):
                     mechanism = PyKCS11.CKM_SHA1_RSA_PKCS
-                elif isinstance(hash_algo, hashes.SHA256):
+                elif isinstance(algorithm, hashes.SHA256):
                     mechanism = PyKCS11.CKM_SHA256_RSA_PKCS
                 else:
-                    mechanism = PyKCS11.CKM_SHA1_RSA_PKCS
+                    mechanism = PyKCS11.CKM_SHA256_RSA_PKCS
 
                 sig = self.session.sign(self.key_handle, data, PyKCS11.Mechanism(mechanism))
                 return bytes(sig)
@@ -208,14 +198,19 @@ class SmartCardSigner:
 
         pk11_key = PKCS11Key(self.session, self.privkey_handle, "RSA")
 
+        # SHA-1 is required by SIRMA protocol — signxml blocks it by default
+        import os
+        os.environ["PYXML_ALLOW_DEPRECATED_ALGORITHMS"] = "1"
         signer = XMLSigner(
             method=methods.enveloped,
-            digest_algorithm="sha1",
-            signature_algorithm="rsa-sha1",
+            digest_algorithm="sha256",         # Use SHA-256 (more secure than SIRMA's SHA-1)
+            signature_algorithm="rsa-sha256",  # RSA-SHA256
             c14n_algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments",
         )
 
-        signed = signer.sign(root, key=pk11_key, cert=[self.cert_der])
+        # signxml expects PEM-encoded cert, not DER
+        cert_pem = self.cert.public_bytes(Encoding.PEM)
+        signed = signer.sign(root, key=pk11_key, cert=[cert_pem])
         return signed
 
     def close(self):
@@ -364,11 +359,10 @@ class PRBSignerServer:
                 log.info("Signing [%.60s...] with stampToken [%s]", xml_str, stamp_token)
 
                 try:
-                    # Skip empty XML (browser probe)
+                    # Empty XML = login probe — Sirma uses "<sign/>" as placeholder
                     if not xml_str.strip():
-                        log.info("Empty XML — browser probe, skipping")
-                        await websocket.send("ERROR: empty XML")
-                        continue
+                        xml_str = "<sign/>"
+                        log.info("Empty XML — login probe, using <sign/>")
 
                     # Initialize signer on first sign request
                     if not self.signer:

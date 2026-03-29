@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-29 11:07 — PRODUCTION!
+
+First real document signed successfully!
+- XML: 3016 bytes, преписка 39240, serviceType=3
+- Signed in 0.25 seconds
+- Portal accepted it
+- The Java applet FAILED this morning. prb-signer SUCCEEDED.
+
 ## 2026-03-29
 
 ### Initial release

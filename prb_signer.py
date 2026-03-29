@@ -285,7 +285,7 @@ class PRBSignerServer:
                         x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
                         x509.DNSName("localhost"),
                         x509.DNSName("127.0.0.1"),
-                        x509.RFC822Name("sc@smooker.org"),
+                        x509.RFC822Name("signer@localhost"),
                         x509.DirectoryName(x509.Name([
                             x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1"),
                         ])),

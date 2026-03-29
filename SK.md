@@ -1,1 +1,0 @@
-/home/claude-agent/work/claude/SMOOKNOWLEDGE.md
